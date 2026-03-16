@@ -2,8 +2,8 @@
 /**
  * Plugin Name: MFSD Course Manager
  * Description: Admin interface for configuring MFSD courses, task ordering and viewing student progress.
- * Version:     1.0.0
- * Author:      s47d
+ * Version:     1.0.1
+ * Author:      MisterT9007
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
