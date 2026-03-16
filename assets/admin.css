@@ -1,0 +1,195 @@
+/* ─────────────────────────────────────────────
+   MFSD Course Manager — Admin Styles
+   ───────────────────────────────────────────── */
+
+.mfsd-cm-wrap h1 {
+    margin-bottom: 0;
+}
+
+/* ── Tabs ── */
+.mfsd-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 16px 0 0;
+    border-bottom: 2px solid #c3c4c7;
+}
+
+.mfsd-tab {
+    display: inline-block;
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    color: #50575e;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    background: #f0f0f1;
+    transition: background 0.15s, color 0.15s;
+}
+
+.mfsd-tab:hover {
+    background: #fff;
+    color: #1d2327;
+}
+
+.mfsd-tab-active {
+    background: #fff;
+    color: #1d2327;
+    border-color: #c3c4c7;
+    border-bottom-color: #fff;
+    margin-bottom: -2px;
+}
+
+/* ── Card ── */
+.mfsd-tab-content {
+    padding-top: 4px;
+}
+
+.mfsd-card {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-radius: 0 4px 4px 4px;
+    padding: 24px 28px;
+    margin-top: 0;
+}
+
+.mfsd-card h2 {
+    margin-top: 0;
+    padding-top: 0;
+    border-bottom: 1px solid #f0f0f1;
+    padding-bottom: 12px;
+}
+
+.mfsd-card h3 {
+    margin-bottom: 10px;
+}
+
+/* ── Table ── */
+.mfsd-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.mfsd-table th,
+.mfsd-table td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid #f0f0f1;
+    vertical-align: middle;
+}
+
+.mfsd-table thead th {
+    background: #f6f7f7;
+    font-weight: 600;
+    color: #1d2327;
+    border-bottom: 2px solid #c3c4c7;
+}
+
+.mfsd-table tbody tr:hover {
+    background: #f9f9f9;
+}
+
+/* ── Drag handle ── */
+.mfsd-drag-handle {
+    cursor: grab;
+    color: #aaa;
+    font-size: 18px;
+    user-select: none;
+    text-align: center;
+    width: 30px;
+}
+
+.mfsd-drag-handle:active {
+    cursor: grabbing;
+}
+
+.ui-sortable-helper {
+    background: #fff8e5 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.ui-sortable-placeholder {
+    visibility: visible !important;
+    background: #e8f4ff;
+    height: 40px;
+}
+
+/* ── Form helpers ── */
+.mfsd-form-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.mfsd-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+}
+
+.mfsd-form-grid label {
+    display: block;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 4px;
+    color: #50575e;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+/* ── Status badges ── */
+.mfsd-status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.badge-active     { background: #d1fae5; color: #065f46; }
+.badge-inactive   { background: #f3f4f6; color: #6b7280; }
+.badge-completed  { background: #d1fae5; color: #065f46; }
+.badge-inprogress { background: #fef3c7; color: #92400e; }
+.badge-available  { background: #dbeafe; color: #1e40af; }
+.badge-notstarted { background: #f3f4f6; color: #6b7280; }
+.badge-locked     { background: #fee2e2; color: #991b1b; }
+
+/* ── Messages ── */
+.mfsd-message {
+    font-size: 13px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.msg-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.msg-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+/* ── Misc ── */
+.mfsd-card hr {
+    border: none;
+    border-top: 1px solid #f0f0f1;
+    margin: 20px 0;
+}
+
+code {
+    background: #f6f7f7;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: #1d2327;
+}
