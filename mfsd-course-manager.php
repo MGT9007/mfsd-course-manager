@@ -2,11 +2,24 @@
 /**
  * Plugin Name: MFSD Course Manager
  * Description: Admin interface for configuring MFSD courses, task ordering and viewing student progress.
- * Version:     1.0.1
+ * Version:     2.0.0
  * Author:      MisterT9007
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+// ─────────────────────────────────────────────
+// DB MIGRATION — add image_url column if absent
+// ─────────────────────────────────────────────
+
+add_action( 'admin_init', function () {
+    global $wpdb;
+    $table = $wpdb->prefix . 'mfsd_courses';
+    $col   = $wpdb->get_results( "SHOW COLUMNS FROM `{$table}` LIKE 'image_url'" );
+    if ( empty( $col ) ) {
+        $wpdb->query( "ALTER TABLE `{$table}` ADD COLUMN `image_url` VARCHAR(500) NULL DEFAULT NULL AFTER `course_slug`" );
+    }
+} );
 
 // ─────────────────────────────────────────────
 // DEPENDENCY CHECK
@@ -41,20 +54,21 @@ add_action( 'admin_menu', function () {
 add_action( 'admin_enqueue_scripts', function ( $hook ) {
     if ( $hook !== 'toplevel_page_mfsd-course-manager' ) return;
 
+    wp_enqueue_media(); // WordPress media library
     wp_enqueue_script( 'jquery-ui-sortable' );
 
     wp_enqueue_style(
         'mfsd-cm-style',
         plugin_dir_url( __FILE__ ) . 'assets/admin.css',
         [],
-        '1.0.0'
+        '1.1.0'
     );
 
     wp_enqueue_script(
         'mfsd-cm-script',
         plugin_dir_url( __FILE__ ) . 'assets/admin.js',
         [ 'jquery', 'jquery-ui-sortable' ],
-        '1.0.0',
+        '1.1.0',
         true
     );
 
@@ -71,12 +85,12 @@ add_action( 'admin_enqueue_scripts', function ( $hook ) {
 function mfsd_cm_render_page() {
     if ( ! function_exists( 'mfsd_get_task_status' ) ) return;
 
-    $tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'courses';
+    $tab  = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'courses';
     $tabs = [
-        'courses'     => 'Courses',
-        'task-order'  => 'Task Order',
-        'progress'    => 'Student Progress',
-        'enrolments'  => 'Enrolments',
+        'courses'    => 'Courses',
+        'task-order' => 'Task Order',
+        'progress'   => 'Student Progress',
+        'enrolments' => 'Enrolments',
     ];
     ?>
     <div class="wrap mfsd-cm-wrap">
@@ -122,6 +136,7 @@ function mfsd_cm_tab_courses() {
             <thead>
                 <tr>
                     <th>ID</th>
+                    <th>Image</th>
                     <th>Course Name</th>
                     <th>Slug</th>
                     <th>Active</th>
@@ -132,6 +147,26 @@ function mfsd_cm_tab_courses() {
                 <?php if ( $courses ) : foreach ( $courses as $c ) : ?>
                 <tr data-id="<?php echo esc_attr( $c->id ); ?>">
                     <td><?php echo esc_html( $c->id ); ?></td>
+                    <td class="mfsd-course-thumb-cell">
+                        <?php if ( ! empty( $c->image_url ) ) : ?>
+                            <img src="<?php echo esc_url( $c->image_url ); ?>"
+                                 class="mfsd-course-thumb" alt="">
+                        <?php else : ?>
+                            <div class="mfsd-course-thumb-placeholder">No image</div>
+                        <?php endif; ?>
+                        <button class="button button-small mfsd-upload-image"
+                                data-id="<?php echo esc_attr( $c->id ); ?>"
+                                style="margin-top:6px;display:block;">
+                            <?php echo empty( $c->image_url ) ? '+ Add Image' : '↺ Change'; ?>
+                        </button>
+                        <?php if ( ! empty( $c->image_url ) ) : ?>
+                            <button class="button button-small button-link-delete mfsd-remove-image"
+                                    data-id="<?php echo esc_attr( $c->id ); ?>"
+                                    style="margin-top:4px;display:block;">
+                                Remove
+                            </button>
+                        <?php endif; ?>
+                    </td>
                     <td class="editable-name"><?php echo esc_html( $c->course_name ); ?></td>
                     <td><code><?php echo esc_html( $c->course_slug ); ?></code></td>
                     <td>
@@ -152,7 +187,7 @@ function mfsd_cm_tab_courses() {
                     </td>
                 </tr>
                 <?php endforeach; else : ?>
-                <tr><td colspan="5" style="text-align:center;color:#999;">No courses yet.</td></tr>
+                <tr><td colspan="6" style="text-align:center;color:#999;">No courses yet.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
@@ -164,6 +199,7 @@ function mfsd_cm_tab_courses() {
             <input type="text" id="new-course-slug" placeholder="course-slug (e.g. foundation)" class="regular-text">
             <button class="button button-primary" id="mfsd-add-course">Add Course</button>
         </div>
+        <p class="description" style="margin-top:6px;">You can add a course image after the course has been created.</p>
         <p id="mfsd-course-message" class="mfsd-message" style="display:none;"></p>
     </div>
     <?php
@@ -195,7 +231,6 @@ function mfsd_cm_tab_task_order() {
         </div>
 
         <div id="mfsd-task-order-container" style="display:none;">
-
             <div id="mfsd-task-list-wrapper">
                 <p class="description">Drag rows to reorder. Click <strong>Save Order</strong> after reordering.</p>
                 <table class="mfsd-table">
@@ -249,8 +284,7 @@ function mfsd_cm_tab_task_order() {
                 <button class="button button-primary" id="mfsd-add-task">Add Task</button>
                 <span id="mfsd-task-message" class="mfsd-message" style="display:none;"></span>
             </div>
-
-        </div><!-- /mfsd-task-order-container -->
+        </div>
 
         <?php endif; ?>
     </div>
@@ -417,10 +451,30 @@ add_action( 'wp_ajax_mfsd_cm_delete_course', function () {
 
     global $wpdb;
     $id = (int) ( $_POST['id'] ?? 0 );
-    $wpdb->delete( "{$wpdb->prefix}mfsd_courses",     [ 'id'        => $id ] );
-    $wpdb->delete( "{$wpdb->prefix}mfsd_task_order",  [ 'course_id' => $id ] );
-    $wpdb->delete( "{$wpdb->prefix}mfsd_enrolments",  [ 'course_id' => $id ] );
+    $wpdb->delete( "{$wpdb->prefix}mfsd_courses",    [ 'id'        => $id ] );
+    $wpdb->delete( "{$wpdb->prefix}mfsd_task_order", [ 'course_id' => $id ] );
+    $wpdb->delete( "{$wpdb->prefix}mfsd_enrolments", [ 'course_id' => $id ] );
     wp_send_json_success();
+} );
+
+// ── Save course image URL ─────────────────────
+add_action( 'wp_ajax_mfsd_cm_save_course_image', function () {
+    check_ajax_referer( 'mfsd_cm_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
+
+    global $wpdb;
+    $id  = (int) ( $_POST['id'] ?? 0 );
+    $url = esc_url_raw( $_POST['image_url'] ?? '' );
+
+    if ( ! $id ) wp_send_json_error( 'Invalid course ID.' );
+
+    $wpdb->update(
+        "{$wpdb->prefix}mfsd_courses",
+        [ 'image_url' => $url ?: null ],
+        [ 'id' => $id ]
+    );
+
+    wp_send_json_success( [ 'image_url' => $url ] );
 } );
 
 // ─────────────────────────────────────────────
@@ -436,8 +490,7 @@ add_action( 'wp_ajax_mfsd_cm_get_tasks', function () {
 
     $tasks = $wpdb->get_results( $wpdb->prepare(
         "SELECT * FROM {$wpdb->prefix}mfsd_task_order
-         WHERE course_id = %d
-         ORDER BY sequence_order ASC",
+         WHERE course_id = %d ORDER BY sequence_order ASC",
         $course_id
     ) );
 
@@ -459,7 +512,6 @@ add_action( 'wp_ajax_mfsd_cm_add_task', function () {
         wp_send_json_error( 'All fields are required.' );
     }
 
-    // Next sequence_order for this course
     $max_seq = (int) $wpdb->get_var( $wpdb->prepare(
         "SELECT MAX(sequence_order) FROM {$wpdb->prefix}mfsd_task_order WHERE course_id = %d",
         $course_id
@@ -483,7 +535,6 @@ add_action( 'wp_ajax_mfsd_cm_save_order', function () {
     if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
 
     global $wpdb;
-    // Expects ordered array of task IDs
     $order = array_map( 'intval', $_POST['order'] ?? [] );
 
     foreach ( $order as $seq => $task_id ) {
@@ -542,7 +593,7 @@ add_action( 'wp_ajax_mfsd_cm_get_progress', function () {
 
     if ( $student_id ) {
         $sql .= " AND p.student_id = %d";
-        array_unshift( $params, $student_id ); // early join param
+        array_unshift( $params, $student_id );
     }
 
     $sql .= " LEFT JOIN {$wpdb->users} u ON u.ID = p.student_id
@@ -597,10 +648,10 @@ add_action( 'wp_ajax_mfsd_cm_add_enrolment', function () {
     ) );
 
     wp_send_json_success( [
-        'id'           => $wpdb->insert_id,
-        'student_name' => $student ? $student->display_name : 'Unknown',
-        'course_name'  => $course  ? $course->course_name   : 'Unknown',
-        'enrolled_date'=> current_time( 'mysql' ),
+        'id'            => $wpdb->insert_id,
+        'student_name'  => $student ? $student->display_name : 'Unknown',
+        'course_name'   => $course  ? $course->course_name   : 'Unknown',
+        'enrolled_date' => current_time( 'mysql' ),
     ] );
 } );
 

@@ -25,10 +25,78 @@ jQuery(function ($) {
     }
 
     // ─────────────────────────────────────────
-    // TAB: COURSES
+    // TAB: COURSES — image upload via WP media
     // ─────────────────────────────────────────
 
-    // Add course
+    let mediaFrame = null;
+
+    $(document).on('click', '.mfsd-upload-image', function (e) {
+        e.preventDefault();
+        const $btn  = $(this);
+        const id    = $btn.data('id');
+        const $cell = $btn.closest('.mfsd-course-thumb-cell');
+
+        // Open / reuse the WP media library frame
+        if (mediaFrame) mediaFrame.close();
+
+        mediaFrame = wp.media({
+            title:    'Select Course Image',
+            button:   { text: 'Use this image' },
+            multiple: false,
+            library:  { type: 'image' },
+        });
+
+        mediaFrame.on('select', function () {
+            const attachment = mediaFrame.state().get('selection').first().toJSON();
+            const url = attachment.url;
+
+            ajax('mfsd_cm_save_course_image', { id, image_url: url }, () => {
+                // Update thumbnail in the table row immediately
+                const $thumb = $cell.find('.mfsd-course-thumb');
+                if ($thumb.length) {
+                    $thumb.attr('src', url);
+                } else {
+                    $cell.find('.mfsd-course-thumb-placeholder').replaceWith(
+                        `<img src="${escHtml(url)}" class="mfsd-course-thumb" alt="">`
+                    );
+                }
+                $btn.text('↺ Change');
+
+                // Add Remove button if not already there
+                if (!$cell.find('.mfsd-remove-image').length) {
+                    $btn.after(
+                        `<button class="button button-small button-link-delete mfsd-remove-image"
+                                 data-id="${id}"
+                                 style="margin-top:4px;display:block;">Remove</button>`
+                    );
+                }
+            }, msg => alert('Could not save image: ' + msg));
+        });
+
+        mediaFrame.open();
+    });
+
+    // Remove course image
+    $(document).on('click', '.mfsd-remove-image', function (e) {
+        e.preventDefault();
+        if (!confirm('Remove this course image?')) return;
+        const $btn  = $(this);
+        const id    = $btn.data('id');
+        const $cell = $btn.closest('.mfsd-course-thumb-cell');
+
+        ajax('mfsd_cm_save_course_image', { id, image_url: '' }, () => {
+            $cell.find('.mfsd-course-thumb').replaceWith(
+                '<div class="mfsd-course-thumb-placeholder">No image</div>'
+            );
+            $cell.find('.mfsd-upload-image').text('+ Add Image');
+            $btn.remove();
+        }, msg => alert('Could not remove image: ' + msg));
+    });
+
+    // ─────────────────────────────────────────
+    // TAB: COURSES — add / toggle / delete
+    // ─────────────────────────────────────────
+
     $('#mfsd-add-course').on('click', function () {
         const name = $('#new-course-name').val().trim();
         const slug = $('#new-course-slug').val().trim();
@@ -41,12 +109,17 @@ jQuery(function ($) {
 
         ajax('mfsd_cm_add_course', { course_name: name, course_slug: slug }, data => {
             const $tbody = $('#mfsd-courses-table tbody');
-            // Remove "no courses" row if present
             $tbody.find('td[colspan]').closest('tr').remove();
 
             $tbody.append(`
                 <tr data-id="${data.id}">
                     <td>${data.id}</td>
+                    <td class="mfsd-course-thumb-cell">
+                        <div class="mfsd-course-thumb-placeholder">No image</div>
+                        <button class="button button-small mfsd-upload-image"
+                                data-id="${data.id}"
+                                style="margin-top:6px;display:block;">+ Add Image</button>
+                    </td>
                     <td class="editable-name">${escHtml(data.course_name)}</td>
                     <td><code>${escHtml(data.course_slug)}</code></td>
                     <td><span class="mfsd-status-badge badge-active">Active</span></td>
@@ -64,11 +137,10 @@ jQuery(function ($) {
         }, msg => showMsg($msg, msg, true));
     });
 
-    // Toggle course active state
     $(document).on('click', '.mfsd-toggle-course', function () {
-        const $btn    = $(this);
-        const id      = $btn.data('id');
-        const active  = parseInt($btn.data('active'));
+        const $btn   = $(this);
+        const id     = $btn.data('id');
+        const active = parseInt($btn.data('active'));
 
         ajax('mfsd_cm_toggle_course', { id, active }, data => {
             const $row   = $btn.closest('tr');
@@ -83,7 +155,6 @@ jQuery(function ($) {
         }, msg => alert(msg));
     });
 
-    // Delete course
     $(document).on('click', '.mfsd-delete-course', function () {
         if (!confirm('Delete this course? This will also remove all associated tasks. Student progress records are retained.')) return;
         const $btn = $(this);
@@ -95,15 +166,12 @@ jQuery(function ($) {
     });
 
     // ─────────────────────────────────────────
-    // TAB: TASK ORDER — load tasks on course select
+    // TAB: TASK ORDER
     // ─────────────────────────────────────────
 
     $('#mfsd-course-select').on('change', function () {
         const course_id = $(this).val();
-        if (!course_id) {
-            $('#mfsd-task-order-container').hide();
-            return;
-        }
+        if (!course_id) { $('#mfsd-task-order-container').hide(); return; }
         loadTasks(course_id);
     });
 
@@ -149,7 +217,6 @@ jQuery(function ($) {
             handle: '.mfsd-drag-handle',
             axis:   'y',
             update: function () {
-                // Update visible sequence numbers
                 $(this).find('tr').each(function (i) {
                     $(this).find('.seq-no').text(i + 1);
                 });
@@ -157,7 +224,6 @@ jQuery(function ($) {
         });
     }
 
-    // Save order
     $('#mfsd-save-order').on('click', function () {
         const $msg  = $('#mfsd-order-message');
         const order = [];
@@ -170,7 +236,6 @@ jQuery(function ($) {
         }, msg => showMsg($msg, msg, true));
     });
 
-    // Add task
     $('#mfsd-add-task').on('click', function () {
         const course_id    = $('#mfsd-course-select').val();
         const display_name = $('#new-task-name').val().trim();
@@ -187,11 +252,10 @@ jQuery(function ($) {
         ajax('mfsd_cm_add_task', { course_id, display_name, task_slug, week, task_no }, () => {
             $('#new-task-name, #new-task-slug').val('');
             showMsg($msg, `Task "${display_name}" added.`, false);
-            loadTasks(course_id);  // Reload full list with updated sequence
+            loadTasks(course_id);
         }, msg => showMsg($msg, msg, true));
     });
 
-    // Delete task
     $(document).on('click', '.mfsd-delete-task', function () {
         if (!confirm('Delete this task from the course ordering?')) return;
         const $btn = $(this);
@@ -200,7 +264,6 @@ jQuery(function ($) {
         ajax('mfsd_cm_delete_task', { id }, () => {
             $btn.closest('tr').fadeOut(300, function () {
                 $(this).remove();
-                // Re-number
                 $('#mfsd-sortable-tasks tr[data-id]').each(function (i) {
                     $(this).find('.seq-no').text(i + 1);
                 });
@@ -230,60 +293,31 @@ jQuery(function ($) {
         }
 
         const statusBadge = s => {
-            const map = {
-                'completed':   'badge-completed',
-                'in_progress': 'badge-inprogress',
-                'available':   'badge-available',
-                'not_started': 'badge-notstarted',
-                'locked':      'badge-locked',
-            };
-            const label = {
-                'completed':   'Completed',
-                'in_progress': 'In Progress',
-                'available':   'Available',
-                'not_started': 'Not Started',
-                'locked':      'Locked',
-            };
+            const map   = { completed: 'badge-completed', in_progress: 'badge-inprogress', available: 'badge-available', not_started: 'badge-notstarted', locked: 'badge-locked' };
+            const label = { completed: 'Completed', in_progress: 'In Progress', available: 'Available', not_started: 'Not Started', locked: 'Locked' };
             return `<span class="mfsd-status-badge ${map[s] || ''}">${label[s] || s}</span>`;
         };
 
-        let html = `
-            <table class="mfsd-table">
-                <thead>
-                    <tr>
-                        <th>Student</th>
-                        <th>Task</th>
-                        <th>Week</th>
-                        <th>Seq</th>
-                        <th>Status</th>
-                        <th>Started</th>
-                        <th>Completed</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
+        let html = `<table class="mfsd-table"><thead><tr>
+            <th>Student</th><th>Task</th><th>Week</th><th>Seq</th>
+            <th>Status</th><th>Started</th><th>Completed</th><th>Actions</th>
+        </tr></thead><tbody>`;
 
         rows.forEach(r => {
             const started   = r.started_date   ? r.started_date.substring(0,10)   : '—';
             const completed = r.completed_date ? r.completed_date.substring(0,10) : '—';
             const resetBtn  = r.progress_id
-                ? `<button class="button button-small button-link-delete mfsd-reset-task"
-                           data-id="${r.progress_id}">Reset</button>`
+                ? `<button class="button button-small button-link-delete mfsd-reset-task" data-id="${r.progress_id}">Reset</button>`
                 : '—';
 
-            html += `
-                <tr data-progress="${r.progress_id || ''}">
-                    <td>${escHtml(r.student_name || '—')}</td>
-                    <td>${escHtml(r.display_name)}</td>
-                    <td>${r.week}</td>
-                    <td>${r.sequence_order}</td>
-                    <td>${statusBadge(r.status)}</td>
-                    <td>${started}</td>
-                    <td>${completed}</td>
-                    <td>${resetBtn}</td>
-                </tr>
-            `;
+            html += `<tr data-progress="${r.progress_id || ''}">
+                <td>${escHtml(r.student_name || '—')}</td>
+                <td>${escHtml(r.display_name)}</td>
+                <td>${r.week}</td><td>${r.sequence_order}</td>
+                <td>${statusBadge(r.status)}</td>
+                <td>${started}</td><td>${completed}</td>
+                <td>${resetBtn}</td>
+            </tr>`;
         });
 
         html += '</tbody></table>';
@@ -351,9 +385,7 @@ jQuery(function ($) {
     // ─────────────────────────────────────────
     function escHtml(str) {
         return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 });
