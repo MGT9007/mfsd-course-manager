@@ -24,6 +24,12 @@ jQuery(function ($) {
          .fail(() => fail && fail('Server error — please try again.'));
     }
 
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     // ─────────────────────────────────────────
     // TAB: COURSES — image upload via WP media
     // ─────────────────────────────────────────
@@ -36,7 +42,6 @@ jQuery(function ($) {
         const id    = $btn.data('id');
         const $cell = $btn.closest('.mfsd-course-thumb-cell');
 
-        // Open / reuse the WP media library frame
         if (mediaFrame) mediaFrame.close();
 
         mediaFrame = wp.media({
@@ -51,7 +56,6 @@ jQuery(function ($) {
             const url = attachment.url;
 
             ajax('mfsd_cm_save_course_image', { id, image_url: url }, () => {
-                // Update thumbnail in the table row immediately
                 const $thumb = $cell.find('.mfsd-course-thumb');
                 if ($thumb.length) {
                     $thumb.attr('src', url);
@@ -62,7 +66,6 @@ jQuery(function ($) {
                 }
                 $btn.text('↺ Change');
 
-                // Add Remove button if not already there
                 if (!$cell.find('.mfsd-remove-image').length) {
                     $btn.after(
                         `<button class="button button-small button-link-delete mfsd-remove-image"
@@ -76,7 +79,6 @@ jQuery(function ($) {
         mediaFrame.open();
     });
 
-    // Remove course image
     $(document).on('click', '.mfsd-remove-image', function (e) {
         e.preventDefault();
         if (!confirm('Remove this course image?')) return;
@@ -191,50 +193,102 @@ jQuery(function ($) {
             return;
         }
 
+        let seqNo       = 1;
+        let currentWeek = null;
+
         tasks.forEach(t => {
-            $tbody.append(`
-                <tr data-id="${t.id}">
+            const week = parseInt(t.week);
+            if (week !== currentWeek) {
+                currentWeek = week;
+                $tbody.append(weekHeaderRow(week));
+            }
+            const $row = $(`
+                <tr data-id="${t.id}" data-week="${week}" data-task-no="${t.task_no}">
                     <td class="mfsd-drag-handle" title="Drag to reorder">⠿</td>
-                    <td class="seq-no">${t.sequence_order}</td>
-                    <td>Week ${t.week}</td>
-                    <td>${t.task_no}</td>
-                    <td>${escHtml(t.display_name)}</td>
+                    <td class="seq-no">${seqNo++}</td>
+                    <td class="task-week-display">Week ${week}</td>
+                    <td class="task-no-display">${t.task_no}</td>
+                    <td class="task-name-display">${escHtml(t.display_name)}</td>
                     <td><code>${escHtml(t.task_slug)}</code></td>
                     <td><span class="mfsd-status-badge ${t.active == 1 ? 'badge-active' : 'badge-inactive'}">${t.active == 1 ? 'Active' : 'Off'}</span></td>
                     <td>
-                        <button class="button button-small button-link-delete mfsd-delete-task"
-                                data-id="${t.id}">Delete</button>
+                        <button class="button button-small mfsd-edit-task" data-id="${t.id}">Edit</button>
+                        <button class="button button-small button-link-delete mfsd-delete-task" data-id="${t.id}">Delete</button>
                     </td>
                 </tr>
             `);
+            $row.data('display-name', t.display_name);
+            $tbody.append($row);
         });
 
         initSortable();
     }
 
-    function initSortable() {
-        $('#mfsd-sortable-tasks').sortable({
-            handle: '.mfsd-drag-handle',
-            axis:   'y',
-            update: function () {
-                $(this).find('tr').each(function (i) {
-                    $(this).find('.seq-no').text(i + 1);
-                });
+    function weekHeaderRow(week) {
+        return `<tr class="mfsd-week-header" data-week="${week}"><td colspan="8">📅 Week ${week}</td></tr>`;
+    }
+
+    function refreshWeekHeaders() {
+        $('#mfsd-sortable-tasks .mfsd-week-header').remove();
+        let currentWeek = null;
+        $('#mfsd-sortable-tasks tr[data-id]').each(function () {
+            const week = parseInt($(this).data('week'));
+            if (week !== currentWeek) {
+                currentWeek = week;
+                $(this).before(weekHeaderRow(week));
             }
         });
     }
 
+    function weekSelect(selected) {
+        let opts = '';
+        for (let w = 1; w <= 6; w++) {
+            opts += `<option value="${w}"${w === selected ? ' selected' : ''}>Week ${w}</option>`;
+        }
+        return `<select class="mfsd-edit-week">${opts}</select>`;
+    }
+
+    function initSortable() {
+        const $tbody = $('#mfsd-sortable-tasks');
+        if ($tbody.hasClass('ui-sortable')) $tbody.sortable('destroy');
+
+        $tbody.sortable({
+            handle: '.mfsd-drag-handle',
+            items:  'tr[data-id]',
+            cancel: '.mfsd-week-header',
+            axis:   'y',
+            stop: function (e, ui) {
+                const $row    = ui.item;
+                const $hdr    = $row.prevAll('.mfsd-week-header').first();
+                const newWeek = $hdr.length ? parseInt($hdr.data('week')) : 1;
+
+                $row.data('week', newWeek).attr('data-week', newWeek);
+                $row.find('.task-week-display').text('Week ' + newWeek);
+
+                $(this).find('tr[data-id]').each(function (i) {
+                    $(this).find('.seq-no').text(i + 1);
+                });
+
+                refreshWeekHeaders();
+            }
+        });
+    }
+
+    // ── Save Order ─────────────────────────────
+
     $('#mfsd-save-order').on('click', function () {
-        const $msg  = $('#mfsd-order-message');
-        const order = [];
+        const $msg = $('#mfsd-order-message');
+        const rows = [];
         $('#mfsd-sortable-tasks tr[data-id]').each(function () {
-            order.push($(this).data('id'));
+            rows.push({ id: $(this).data('id'), week: $(this).data('week') });
         });
 
-        ajax('mfsd_cm_save_order', { order }, () => {
+        ajax('mfsd_cm_save_order', { rows }, () => {
             showMsg($msg, 'Order saved.', false);
         }, msg => showMsg($msg, msg, true));
     });
+
+    // ── Add Task ───────────────────────────────
 
     $('#mfsd-add-task').on('click', function () {
         const course_id    = $('#mfsd-course-select').val();
@@ -256,6 +310,8 @@ jQuery(function ($) {
         }, msg => showMsg($msg, msg, true));
     });
 
+    // ── Delete Task ────────────────────────────
+
     $(document).on('click', '.mfsd-delete-task', function () {
         if (!confirm('Delete this task from the course ordering?')) return;
         const $btn = $(this);
@@ -267,8 +323,87 @@ jQuery(function ($) {
                 $('#mfsd-sortable-tasks tr[data-id]').each(function (i) {
                     $(this).find('.seq-no').text(i + 1);
                 });
+                refreshWeekHeaders();
             });
         }, msg => alert(msg));
+    });
+
+    // ── Inline Edit ────────────────────────────
+
+    $(document).on('click', '.mfsd-edit-task', function () {
+        const $row = $(this).closest('tr');
+        if ($row.hasClass('mfsd-editing')) return;
+
+        const week   = parseInt($row.data('week'));
+        const taskNo = parseInt($row.data('task-no'));
+        const name   = $row.data('display-name');
+
+        $row.addClass('mfsd-editing');
+        $row.find('.task-week-display').html(weekSelect(week));
+        $row.find('.task-no-display').html(
+            `<input type="number" class="mfsd-edit-task-no" value="${taskNo}" min="1" max="99" style="width:55px;">`
+        );
+        $row.find('.task-name-display').html(
+            `<input type="text" class="mfsd-edit-name" value="${escHtml(name)}" style="width:160px;">`
+        );
+
+        $(this)
+            .text('Save')
+            .removeClass('mfsd-edit-task')
+            .addClass('mfsd-save-task')
+            .after('<button class="button button-small mfsd-cancel-edit" style="margin-left:4px;">Cancel</button>');
+    });
+
+    $(document).on('click', '.mfsd-cancel-edit', function () {
+        const $row   = $(this).closest('tr');
+        const week   = parseInt($row.data('week'));
+        const taskNo = parseInt($row.data('task-no'));
+        const name   = $row.data('display-name');
+
+        $row.removeClass('mfsd-editing');
+        $row.find('.task-week-display').text('Week ' + week);
+        $row.find('.task-no-display').text(taskNo);
+        $row.find('.task-name-display').text(name);
+        $row.find('.mfsd-save-task')
+            .prop('disabled', false)
+            .text('Edit')
+            .removeClass('mfsd-save-task')
+            .addClass('mfsd-edit-task');
+        $(this).remove();
+    });
+
+    $(document).on('click', '.mfsd-save-task', function () {
+        const $btn   = $(this);
+        const $row   = $btn.closest('tr');
+        const id     = parseInt($row.data('id'));
+        const week   = parseInt($row.find('.mfsd-edit-week').val());
+        const taskNo = parseInt($row.find('.mfsd-edit-task-no').val());
+        const name   = $row.find('.mfsd-edit-name').val().trim();
+
+        if (!name) { alert('Display name is required.'); return; }
+
+        $btn.prop('disabled', true).text('Saving…');
+
+        ajax('mfsd_cm_update_task', { id, week, task_no: taskNo, display_name: name }, () => {
+            $row.data('week', week).attr('data-week', week);
+            $row.data('task-no', taskNo).attr('data-task-no', taskNo);
+            $row.data('display-name', name);
+
+            $row.removeClass('mfsd-editing');
+            $row.find('.task-week-display').text('Week ' + week);
+            $row.find('.task-no-display').text(taskNo);
+            $row.find('.task-name-display').text(name);
+            $btn.prop('disabled', false)
+                .text('Edit')
+                .removeClass('mfsd-save-task')
+                .addClass('mfsd-edit-task');
+            $row.find('.mfsd-cancel-edit').remove();
+
+            refreshWeekHeaders();
+        }, msg => {
+            alert('Could not save: ' + msg);
+            $btn.prop('disabled', false).text('Save');
+        });
     });
 
     // ─────────────────────────────────────────
@@ -379,13 +514,4 @@ jQuery(function ($) {
             $btn.closest('tr').fadeOut(300, function () { $(this).remove(); });
         }, msg => alert(msg));
     });
-
-    // ─────────────────────────────────────────
-    // UTILITY
-    // ─────────────────────────────────────────
-    function escHtml(str) {
-        return String(str)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
 });

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MFSD Course Manager
  * Description: Admin interface for configuring MFSD courses, task ordering and viewing student progress.
- * Version:     2.0.0
+ * Version:     2.1.0
  * Author:      MisterT9007
  */
 
@@ -61,14 +61,14 @@ add_action( 'admin_enqueue_scripts', function ( $hook ) {
         'mfsd-cm-style',
         plugin_dir_url( __FILE__ ) . 'assets/admin.css',
         [],
-        '1.1.0'
+        '2.1.0'
     );
 
     wp_enqueue_script(
         'mfsd-cm-script',
         plugin_dir_url( __FILE__ ) . 'assets/admin.js',
         [ 'jquery', 'jquery-ui-sortable' ],
-        '1.1.0',
+        '2.1.0',
         true
     );
 
@@ -273,6 +273,9 @@ function mfsd_cm_tab_task_order() {
                         <option value="1">Week 1</option>
                         <option value="2">Week 2</option>
                         <option value="3">Week 3</option>
+                        <option value="4">Week 4</option>
+                        <option value="5">Week 5</option>
+                        <option value="6">Week 6</option>
                     </select>
                 </div>
                 <div>
@@ -535,15 +538,54 @@ add_action( 'wp_ajax_mfsd_cm_save_order', function () {
     if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
 
     global $wpdb;
-    $order = array_map( 'intval', $_POST['order'] ?? [] );
+    $rows  = $_POST['rows']  ?? null;
+    $order = $_POST['order'] ?? null;
 
-    foreach ( $order as $seq => $task_id ) {
-        $wpdb->update(
-            "{$wpdb->prefix}mfsd_task_order",
-            [ 'sequence_order' => $seq + 1 ],
-            [ 'id' => $task_id ]
-        );
+    if ( $rows ) {
+        // New format: rows[N][id] + rows[N][week] — auto-calculates task_no per week group
+        $week_counters = [];
+        foreach ( $rows as $seq => $row ) {
+            $task_id = (int) ( $row['id']   ?? 0 );
+            $week    = (int) ( $row['week'] ?? 1 );
+            if ( ! $task_id ) continue;
+            $week_counters[ $week ] = ( $week_counters[ $week ] ?? 0 ) + 1;
+            $wpdb->update(
+                "{$wpdb->prefix}mfsd_task_order",
+                [ 'sequence_order' => (int) $seq + 1, 'week' => $week, 'task_no' => $week_counters[ $week ] ],
+                [ 'id' => $task_id ]
+            );
+        }
+    } elseif ( $order ) {
+        // Legacy format: flat array of IDs
+        foreach ( array_map( 'intval', $order ) as $seq => $task_id ) {
+            $wpdb->update(
+                "{$wpdb->prefix}mfsd_task_order",
+                [ 'sequence_order' => $seq + 1 ],
+                [ 'id' => $task_id ]
+            );
+        }
     }
+
+    wp_send_json_success();
+} );
+
+add_action( 'wp_ajax_mfsd_cm_update_task', function () {
+    check_ajax_referer( 'mfsd_cm_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
+
+    global $wpdb;
+    $id           = (int) ( $_POST['id']           ?? 0 );
+    $week         = (int) ( $_POST['week']         ?? 1 );
+    $task_no      = (int) ( $_POST['task_no']      ?? 1 );
+    $display_name = sanitize_text_field( $_POST['display_name'] ?? '' );
+
+    if ( ! $id || ! $display_name ) wp_send_json_error( 'Invalid data.' );
+
+    $wpdb->update(
+        "{$wpdb->prefix}mfsd_task_order",
+        [ 'week' => $week, 'task_no' => $task_no, 'display_name' => $display_name ],
+        [ 'id' => $id ]
+    );
 
     wp_send_json_success();
 } );
