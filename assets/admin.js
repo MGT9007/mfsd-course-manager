@@ -4,6 +4,13 @@ jQuery(function ($) {
 
     const { ajaxUrl, nonce } = mfsdCM;
 
+    const TASK_COLSPAN = 9;
+
+    // Populated from mfsd_cm_get_tasks each time a course is selected —
+    // { [week]: title } — read by weekHeaderRow() for display.
+    let weekTitles   = {};
+    let currentCourseId = null;
+
     // ─────────────────────────────────────────
     // HELPER: show message
     // ─────────────────────────────────────────
@@ -173,13 +180,15 @@ jQuery(function ($) {
 
     $('#mfsd-course-select').on('change', function () {
         const course_id = $(this).val();
+        currentCourseId = course_id || null;
         if (!course_id) { $('#mfsd-task-order-container').hide(); return; }
         loadTasks(course_id);
     });
 
     function loadTasks(course_id) {
         ajax('mfsd_cm_get_tasks', { course_id }, data => {
-            renderTaskRows(data);
+            weekTitles = data.week_titles || {};
+            renderTaskRows(data.tasks || []);
             $('#mfsd-task-order-container').show();
         }, msg => alert(msg));
     }
@@ -189,7 +198,7 @@ jQuery(function ($) {
         $tbody.empty();
 
         if (!tasks.length) {
-            $tbody.append('<tr><td colspan="8" style="text-align:center;color:#999;">No tasks yet — add one below.</td></tr>');
+            $tbody.append(`<tr><td colspan="${TASK_COLSPAN}" style="text-align:center;color:#999;">No tasks yet — add one below.</td></tr>`);
             return;
         }
 
@@ -202,6 +211,7 @@ jQuery(function ($) {
                 currentWeek = week;
                 $tbody.append(weekHeaderRow(week));
             }
+            const hasBadge = !!t.badge_slug;
             const $row = $(`
                 <tr data-id="${t.id}" data-week="${week}" data-task-no="${t.task_no}">
                     <td class="mfsd-drag-handle" title="Drag to reorder">⠿</td>
@@ -210,14 +220,21 @@ jQuery(function ($) {
                     <td class="task-no-display">${t.task_no}</td>
                     <td class="task-name-display">${escHtml(t.display_name)}</td>
                     <td><code>${escHtml(t.task_slug)}</code></td>
+                    <td class="task-badge-indicator" style="text-align:center;">${hasBadge ? '🏅' : '—'}</td>
                     <td><span class="mfsd-status-badge ${t.active == 1 ? 'badge-active' : 'badge-inactive'}">${t.active == 1 ? 'Active' : 'Off'}</span></td>
                     <td>
                         <button class="button button-small mfsd-edit-task" data-id="${t.id}">Edit</button>
+                        <button class="button button-small mfsd-toggle-task" data-id="${t.id}" data-active="${t.active}">${t.active == 1 ? 'Deactivate' : 'Activate'}</button>
                         <button class="button button-small button-link-delete mfsd-delete-task" data-id="${t.id}">Delete</button>
                     </td>
                 </tr>
             `);
             $row.data('display-name', t.display_name);
+            $row.data('badge-slug', t.badge_slug || '');
+            $row.data('badge-image', t.badge_image || '');
+            $row.data('coin-value', t.coin_value != null ? parseInt(t.coin_value) : 10);
+            $row.data('is-rag', t.is_rag == 1);
+            $row.data('counts', t.counts_for_week_badge == 1);
             $tbody.append($row);
         });
 
@@ -225,7 +242,10 @@ jQuery(function ($) {
     }
 
     function weekHeaderRow(week) {
-        return `<tr class="mfsd-week-header" data-week="${week}"><td colspan="8">📅 Week ${week}</td></tr>`;
+        const title = weekTitles[week] || ('Week ' + week);
+        return `<tr class="mfsd-week-header" data-week="${week}"><td colspan="${TASK_COLSPAN}">
+            📅 <span class="mfsd-week-title-text" data-week="${week}" title="Click to rename">${escHtml(title)}</span>
+        </td></tr>`;
     }
 
     function refreshWeekHeaders() {
@@ -239,6 +259,46 @@ jQuery(function ($) {
             }
         });
     }
+
+    // ── Editable week titles ───────────────────
+
+    $(document).on('click', '.mfsd-week-title-text', function () {
+        const $span = $(this);
+        if ($span.data('editing')) return;
+        $span.data('editing', true);
+
+        const week    = parseInt($span.data('week'));
+        const current = $span.text();
+
+        const $input = $(`<input type="text" class="mfsd-week-title-input" value="${escHtml(current)}" style="width:320px;">`);
+        $span.replaceWith($input);
+        $input.trigger('focus').trigger('select');
+
+        const save = () => {
+            const newTitle = $input.val().trim();
+            const $restored = $(`<span class="mfsd-week-title-text" data-week="${week}" title="Click to rename">${escHtml(newTitle || ('Week ' + week))}</span>`);
+            $input.replaceWith($restored);
+
+            if (!newTitle || newTitle === (weekTitles[week] || ('Week ' + week))) return;
+            if (!currentCourseId) return;
+
+            ajax('mfsd_cm_save_week_title', { course_id: currentCourseId, week, title: newTitle }, () => {
+                weekTitles[week] = newTitle;
+            }, msg => {
+                alert('Could not save week title: ' + msg);
+                $restored.text(weekTitles[week] || ('Week ' + week));
+            });
+        };
+
+        $input.on('blur', save);
+        $input.on('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); $input.trigger('blur'); }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                $input.replaceWith(`<span class="mfsd-week-title-text" data-week="${week}" title="Click to rename">${escHtml(current)}</span>`);
+            }
+        });
+    });
 
     function weekSelect(selected) {
         let opts = '';
@@ -255,7 +315,7 @@ jQuery(function ($) {
         $tbody.sortable({
             handle: '.mfsd-drag-handle',
             items:  'tr[data-id]',
-            cancel: '.mfsd-week-header',
+            cancel: '.mfsd-week-header, .mfsd-edit-detail-row',
             axis:   'y',
             stop: function (e, ui) {
                 const $row    = ui.item;
@@ -288,6 +348,41 @@ jQuery(function ($) {
         }, msg => showMsg($msg, msg, true));
     });
 
+    // ── Add Task — badge image picker ──────────
+
+    let newTaskMediaFrame = null;
+
+    $('#new-task-badge-slug').on('input', function () {
+        const hasSlug = $(this).val().trim().length > 0;
+        $('#new-task-upload-badge-image').prop('disabled', !hasSlug);
+        if (!hasSlug) {
+            $('#new-task-badge-image').val('');
+            $('#new-task-badge-image-preview').empty();
+        }
+    });
+
+    $('#new-task-upload-badge-image').on('click', function (e) {
+        e.preventDefault();
+        if ($(this).prop('disabled')) return;
+
+        if (newTaskMediaFrame) newTaskMediaFrame.close();
+
+        newTaskMediaFrame = wp.media({
+            title:    'Select Badge Image',
+            button:   { text: 'Use this image' },
+            multiple: false,
+            library:  { type: 'image' },
+        });
+
+        newTaskMediaFrame.on('select', function () {
+            const attachment = newTaskMediaFrame.state().get('selection').first().toJSON();
+            $('#new-task-badge-image').val(attachment.url);
+            $('#new-task-badge-image-preview').html(`<img src="${escHtml(attachment.url)}" class="mfsd-badge-thumb" alt="">`);
+        });
+
+        newTaskMediaFrame.open();
+    });
+
     // ── Add Task ───────────────────────────────
 
     $('#mfsd-add-task').on('click', function () {
@@ -296,6 +391,11 @@ jQuery(function ($) {
         const task_slug    = $('#new-task-slug').val().trim();
         const week         = $('#new-task-week').val();
         const task_no      = $('#new-task-no').val();
+        const badge_slug   = $('#new-task-badge-slug').val().trim();
+        const badge_image  = $('#new-task-badge-image').val();
+        const coin_value   = $('#new-task-coin-value').val();
+        const counts_for_week_badge = $('#new-task-counts').is(':checked') ? 1 : 0;
+        const is_rag       = $('#new-task-is-rag').is(':checked') ? 1 : 0;
         const $msg         = $('#mfsd-task-message');
 
         if (!display_name || !task_slug) {
@@ -303,9 +403,19 @@ jQuery(function ($) {
             return;
         }
 
-        ajax('mfsd_cm_add_task', { course_id, display_name, task_slug, week, task_no }, () => {
-            $('#new-task-name, #new-task-slug').val('');
-            showMsg($msg, `Task "${display_name}" added.`, false);
+        ajax('mfsd_cm_add_task', {
+            course_id, display_name, task_slug, week, task_no,
+            badge_slug, badge_image, coin_value, counts_for_week_badge, is_rag,
+        }, data => {
+            $('#new-task-name, #new-task-slug, #new-task-badge-slug').val('');
+            $('#new-task-badge-image').val('');
+            $('#new-task-badge-image-preview').empty();
+            $('#new-task-upload-badge-image').prop('disabled', true);
+            $('#new-task-coin-value').val(10);
+            $('#new-task-counts').prop('checked', true);
+            $('#new-task-is-rag').prop('checked', false);
+
+            showMsg($msg, `Task "${display_name}" added.${data.warning ? ' ⚠️ ' + data.warning : ''}`, false);
             loadTasks(course_id);
         }, msg => showMsg($msg, msg, true));
     });
@@ -328,7 +438,60 @@ jQuery(function ($) {
         }, msg => alert(msg));
     });
 
+    // ── Toggle Task active/off ─────────────────
+
+    $(document).on('click', '.mfsd-toggle-task', function () {
+        const $btn   = $(this);
+        const $row   = $btn.closest('tr');
+        const id     = $btn.data('id');
+        const active = parseInt($btn.data('active'));
+
+        ajax('mfsd_cm_toggle_task', { id, active }, data => {
+            const $badge = $row.find('.mfsd-status-badge');
+            if (data.new_active) {
+                $badge.removeClass('badge-inactive').addClass('badge-active').text('Active');
+                $btn.text('Deactivate').data('active', 1);
+            } else {
+                $badge.removeClass('badge-active').addClass('badge-inactive').text('Off');
+                $btn.text('Activate').data('active', 0);
+            }
+        }, msg => alert(msg));
+    });
+
     // ── Inline Edit ────────────────────────────
+
+    function editDetailRow(id, badgeSlug, badgeImage, coinValue, isRag, counts) {
+        return $(`
+            <tr class="mfsd-edit-detail-row" data-id="${id}">
+                <td colspan="${TASK_COLSPAN}">
+                    <div class="mfsd-form-grid">
+                        <div>
+                            <label>Badge Slug</label>
+                            <input type="text" class="mfsd-edit-badge-slug regular-text" value="${escHtml(badgeSlug)}">
+                        </div>
+                        <div>
+                            <label>Badge Image</label>
+                            <div class="mfsd-edit-badge-image-wrap">
+                                <input type="hidden" class="mfsd-edit-badge-image" value="${escHtml(badgeImage)}">
+                                <div class="mfsd-badge-image-preview">${badgeImage ? `<img src="${escHtml(badgeImage)}" class="mfsd-badge-thumb" alt="">` : ''}</div>
+                                <button type="button" class="button button-small mfsd-upload-edit-badge-image" ${badgeSlug ? '' : 'disabled'}>+ Add Image</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label>Coin Value</label>
+                            <input type="number" class="mfsd-edit-coin-value" value="${coinValue}" min="0" max="999" style="width:70px;">
+                        </div>
+                        <div>
+                            <label><input type="checkbox" class="mfsd-edit-counts" ${counts ? 'checked' : ''}> Counts toward week badge</label>
+                        </div>
+                        <div>
+                            <label><input type="checkbox" class="mfsd-edit-is-rag" ${isRag ? 'checked' : ''}> This is the week's RAG reflection task</label>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        `);
+    }
 
     $(document).on('click', '.mfsd-edit-task', function () {
         const $row = $(this).closest('tr');
@@ -337,6 +500,7 @@ jQuery(function ($) {
         const week   = parseInt($row.data('week'));
         const taskNo = parseInt($row.data('task-no'));
         const name   = $row.data('display-name');
+        const id     = $row.data('id');
 
         $row.addClass('mfsd-editing');
         $row.find('.task-week-display').html(weekSelect(week));
@@ -347,11 +511,52 @@ jQuery(function ($) {
             `<input type="text" class="mfsd-edit-name" value="${escHtml(name)}" style="width:160px;">`
         );
 
+        const $detail = editDetailRow(
+            id,
+            $row.data('badge-slug') || '',
+            $row.data('badge-image') || '',
+            $row.data('coin-value') != null ? $row.data('coin-value') : 10,
+            !!$row.data('is-rag'),
+            !!$row.data('counts')
+        );
+        $row.after($detail);
+
         $(this)
             .text('Save')
             .removeClass('mfsd-edit-task')
             .addClass('mfsd-save-task')
             .after('<button class="button button-small mfsd-cancel-edit" style="margin-left:4px;">Cancel</button>');
+    });
+
+    $(document).on('input', '.mfsd-edit-badge-slug', function () {
+        const $detail = $(this).closest('.mfsd-edit-detail-row');
+        const hasSlug = $(this).val().trim().length > 0;
+        $detail.find('.mfsd-upload-edit-badge-image').prop('disabled', !hasSlug);
+    });
+
+    let editBadgeMediaFrame = null;
+
+    $(document).on('click', '.mfsd-upload-edit-badge-image', function (e) {
+        e.preventDefault();
+        if ($(this).prop('disabled')) return;
+        const $detail = $(this).closest('.mfsd-edit-detail-row');
+
+        if (editBadgeMediaFrame) editBadgeMediaFrame.close();
+
+        editBadgeMediaFrame = wp.media({
+            title:    'Select Badge Image',
+            button:   { text: 'Use this image' },
+            multiple: false,
+            library:  { type: 'image' },
+        });
+
+        editBadgeMediaFrame.on('select', function () {
+            const attachment = editBadgeMediaFrame.state().get('selection').first().toJSON();
+            $detail.find('.mfsd-edit-badge-image').val(attachment.url);
+            $detail.find('.mfsd-badge-image-preview').html(`<img src="${escHtml(attachment.url)}" class="mfsd-badge-thumb" alt="">`);
+        });
+
+        editBadgeMediaFrame.open();
     });
 
     $(document).on('click', '.mfsd-cancel-edit', function () {
@@ -360,6 +565,7 @@ jQuery(function ($) {
         const taskNo = parseInt($row.data('task-no'));
         const name   = $row.data('display-name');
 
+        $row.next('.mfsd-edit-detail-row').remove();
         $row.removeClass('mfsd-editing');
         $row.find('.task-week-display').text('Week ' + week);
         $row.find('.task-no-display').text(taskNo);
@@ -373,33 +579,52 @@ jQuery(function ($) {
     });
 
     $(document).on('click', '.mfsd-save-task', function () {
-        const $btn   = $(this);
-        const $row   = $btn.closest('tr');
-        const id     = parseInt($row.data('id'));
-        const week   = parseInt($row.find('.mfsd-edit-week').val());
-        const taskNo = parseInt($row.find('.mfsd-edit-task-no').val());
-        const name   = $row.find('.mfsd-edit-name').val().trim();
+        const $btn    = $(this);
+        const $row    = $btn.closest('tr');
+        const $detail = $row.next('.mfsd-edit-detail-row');
+        const id      = parseInt($row.data('id'));
+        const week    = parseInt($row.find('.mfsd-edit-week').val());
+        const taskNo  = parseInt($row.find('.mfsd-edit-task-no').val());
+        const name    = $row.find('.mfsd-edit-name').val().trim();
+
+        const badge_slug  = $detail.find('.mfsd-edit-badge-slug').val().trim();
+        const badge_image = $detail.find('.mfsd-edit-badge-image').val();
+        const coin_value  = $detail.find('.mfsd-edit-coin-value').val();
+        const counts_for_week_badge = $detail.find('.mfsd-edit-counts').is(':checked') ? 1 : 0;
+        const is_rag      = $detail.find('.mfsd-edit-is-rag').is(':checked') ? 1 : 0;
 
         if (!name) { alert('Display name is required.'); return; }
 
         $btn.prop('disabled', true).text('Saving…');
 
-        ajax('mfsd_cm_update_task', { id, week, task_no: taskNo, display_name: name }, () => {
+        ajax('mfsd_cm_update_task', {
+            id, week, task_no: taskNo, display_name: name,
+            badge_slug, badge_image, coin_value, counts_for_week_badge, is_rag,
+        }, data => {
             $row.data('week', week).attr('data-week', week);
             $row.data('task-no', taskNo).attr('data-task-no', taskNo);
             $row.data('display-name', name);
+            $row.data('badge-slug', badge_slug);
+            $row.data('badge-image', badge_image);
+            $row.data('coin-value', parseInt(coin_value));
+            $row.data('is-rag', !!is_rag);
+            $row.data('counts', !!counts_for_week_badge);
 
             $row.removeClass('mfsd-editing');
             $row.find('.task-week-display').text('Week ' + week);
             $row.find('.task-no-display').text(taskNo);
             $row.find('.task-name-display').text(name);
+            $row.find('.task-badge-indicator').text(badge_slug ? '🏅' : '—');
             $btn.prop('disabled', false)
                 .text('Edit')
                 .removeClass('mfsd-save-task')
                 .addClass('mfsd-edit-task');
             $row.find('.mfsd-cancel-edit').remove();
+            $detail.remove();
 
             refreshWeekHeaders();
+
+            if (data.warning) alert(data.warning);
         }, msg => {
             alert('Could not save: ' + msg);
             $btn.prop('disabled', false).text('Save');

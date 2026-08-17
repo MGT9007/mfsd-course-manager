@@ -237,3 +237,33 @@ tr.mfsd-editing input[type="number"] {
 .mfsd-course-thumb-placeholder {
      width: 80px; height: 50px; background: #f0f0f1; border: 1px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #999; margin: 0 auto;
 }
+
+/* ── Editable week title ── */
+.mfsd-week-title-text {
+    cursor: pointer;
+    border-bottom: 1px dashed #a5b4fc;
+}
+
+.mfsd-week-title-input {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 5px;
+}
+
+/* ── Task edit detail row (badge/coin/RAG fields) ── */
+tr.mfsd-edit-detail-row td {
+    background: #fffbeb;
+    border-top: none;
+    padding-top: 4px;
+}
+
+/* ── Badge image thumbnail ── */
+.mfsd-badge-image-preview {
+    margin: 4px 0;
+}
+
+.mfsd-badge-thumb {
+    width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; display: block;
+}

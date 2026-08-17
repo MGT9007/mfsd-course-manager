@@ -2,11 +2,13 @@
 /**
  * Plugin Name: MFSD Course Manager
  * Description: Admin interface for configuring MFSD courses, task ordering and viewing student progress.
- * Version:     2.1.0
+ * Version:     3.0.0
  * Author:      MisterT9007
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+define( 'MFSD_CM_VERSION', '3.0.0' );
 
 // ─────────────────────────────────────────────
 // DB MIGRATION — add image_url column if absent
@@ -61,14 +63,14 @@ add_action( 'admin_enqueue_scripts', function ( $hook ) {
         'mfsd-cm-style',
         plugin_dir_url( __FILE__ ) . 'assets/admin.css',
         [],
-        '2.1.0'
+        MFSD_CM_VERSION
     );
 
     wp_enqueue_script(
         'mfsd-cm-script',
         plugin_dir_url( __FILE__ ) . 'assets/admin.js',
         [ 'jquery', 'jquery-ui-sortable' ],
-        '2.1.0',
+        MFSD_CM_VERSION,
         true
     );
 
@@ -232,7 +234,7 @@ function mfsd_cm_tab_task_order() {
 
         <div id="mfsd-task-order-container" style="display:none;">
             <div id="mfsd-task-list-wrapper">
-                <p class="description">Drag rows to reorder. Click <strong>Save Order</strong> after reordering.</p>
+                <p class="description">Drag rows to reorder. Click a week header to rename it. Click <strong>Save Order</strong> after reordering.</p>
                 <table class="mfsd-table">
                     <thead>
                         <tr>
@@ -242,8 +244,9 @@ function mfsd_cm_tab_task_order() {
                             <th style="width:60px;">Task #</th>
                             <th>Display Name</th>
                             <th>Plugin Slug</th>
+                            <th style="width:40px;" title="Badge configured">🏅</th>
                             <th style="width:70px;">Active</th>
-                            <th style="width:80px;">Actions</th>
+                            <th style="width:160px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="mfsd-sortable-tasks">
@@ -281,6 +284,35 @@ function mfsd_cm_tab_task_order() {
                 <div>
                     <label>Task # (within week)</label>
                     <input type="number" id="new-task-no" value="1" min="1" max="99" style="width:70px;">
+                </div>
+                <div>
+                    <label>Badge Slug <span class="description">(optional)</span></label>
+                    <input type="text" id="new-task-badge-slug" placeholder="e.g. badge_word_assoc" class="regular-text">
+                </div>
+                <div>
+                    <label>Badge Image</label>
+                    <div id="new-task-badge-image-wrap">
+                        <input type="hidden" id="new-task-badge-image">
+                        <div id="new-task-badge-image-preview" class="mfsd-badge-image-preview"></div>
+                        <button type="button" class="button button-small mfsd-upload-badge-image" id="new-task-upload-badge-image" disabled>+ Add Image</button>
+                    </div>
+                    <p class="description">Enter a badge slug first to enable this.</p>
+                </div>
+                <div>
+                    <label>Coin Value</label>
+                    <input type="number" id="new-task-coin-value" value="10" min="0" max="999" style="width:70px;">
+                </div>
+                <div>
+                    <label>
+                        <input type="checkbox" id="new-task-counts" checked>
+                        Counts toward week badge
+                    </label>
+                </div>
+                <div>
+                    <label>
+                        <input type="checkbox" id="new-task-is-rag">
+                        This is the week's RAG reflection task
+                    </label>
                 </div>
             </div>
             <div class="mfsd-form-row" style="margin-top:10px;">
@@ -484,6 +516,30 @@ add_action( 'wp_ajax_mfsd_cm_save_course_image', function () {
 // AJAX: TASKS
 // ─────────────────────────────────────────────
 
+/**
+ * Confirmed by Mark: exactly one RAG task per week, always — but it's a
+ * non-blocking warning, not an enforced constraint (MYF-331 spec §9.1).
+ * Shared by both the add and update handlers.
+ *
+ * @return string|null  Warning message, or null if no conflict.
+ */
+function mfsd_cm_check_rag_duplicate( $course_id, $week, $is_rag, $exclude_task_id = 0 ) {
+    if ( ! $is_rag ) return null;
+
+    global $wpdb;
+    $other = $wpdb->get_var( $wpdb->prepare(
+        "SELECT id FROM {$wpdb->prefix}mfsd_task_order
+         WHERE course_id = %d AND week = %d AND is_rag = 1 AND active = 1 AND id != %d
+         LIMIT 1",
+        $course_id, $week, $exclude_task_id
+    ) );
+
+    if ( $other ) {
+        return "Another active RAG task already exists for Week {$week} in this course. Exactly one is expected — you may want to un-flag the other one.";
+    }
+    return null;
+}
+
 add_action( 'wp_ajax_mfsd_cm_get_tasks', function () {
     check_ajax_referer( 'mfsd_cm_nonce', 'nonce' );
     if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
@@ -497,7 +553,11 @@ add_action( 'wp_ajax_mfsd_cm_get_tasks', function () {
         $course_id
     ) );
 
-    wp_send_json_success( $tasks );
+    $week_titles = function_exists( 'mfsd_get_course_week_titles' )
+        ? mfsd_get_course_week_titles( $course_id )
+        : [];
+
+    wp_send_json_success( [ 'tasks' => $tasks, 'week_titles' => $week_titles ] );
 } );
 
 add_action( 'wp_ajax_mfsd_cm_add_task', function () {
@@ -511,6 +571,12 @@ add_action( 'wp_ajax_mfsd_cm_add_task', function () {
     $task_slug    = sanitize_key( $_POST['task_slug']    ?? '' );
     $display_name = sanitize_text_field( $_POST['display_name'] ?? '' );
 
+    $badge_slug   = sanitize_key( $_POST['badge_slug'] ?? '' );
+    $badge_image  = esc_url_raw( $_POST['badge_image'] ?? '' );
+    $coin_value   = (int) ( $_POST['coin_value'] ?? 10 );
+    $is_rag       = ! empty( $_POST['is_rag'] ) ? 1 : 0;
+    $counts       = isset( $_POST['counts_for_week_badge'] ) ? ( $_POST['counts_for_week_badge'] ? 1 : 0 ) : 1;
+
     if ( ! $course_id || ! $task_slug || ! $display_name ) {
         wp_send_json_error( 'All fields are required.' );
     }
@@ -521,16 +587,23 @@ add_action( 'wp_ajax_mfsd_cm_add_task', function () {
     ) );
 
     $wpdb->insert( "{$wpdb->prefix}mfsd_task_order", [
-        'course_id'      => $course_id,
-        'week'           => $week,
-        'task_no'        => $task_no,
-        'sequence_order' => $max_seq + 1,
-        'task_slug'      => $task_slug,
-        'display_name'   => $display_name,
-        'active'         => 1,
+        'course_id'             => $course_id,
+        'week'                  => $week,
+        'task_no'               => $task_no,
+        'sequence_order'        => $max_seq + 1,
+        'task_slug'             => $task_slug,
+        'display_name'          => $display_name,
+        'active'                => 1,
+        'badge_slug'            => $badge_slug ?: null,
+        'badge_image'           => $badge_image ?: null,
+        'coin_value'            => $coin_value,
+        'is_rag'                => $is_rag,
+        'counts_for_week_badge' => $counts,
     ] );
 
-    wp_send_json_success( [ 'id' => $wpdb->insert_id ] );
+    $warning = mfsd_cm_check_rag_duplicate( $course_id, $week, $is_rag, $wpdb->insert_id );
+
+    wp_send_json_success( [ 'id' => $wpdb->insert_id, 'warning' => $warning ] );
 } );
 
 add_action( 'wp_ajax_mfsd_cm_save_order', function () {
@@ -579,15 +652,49 @@ add_action( 'wp_ajax_mfsd_cm_update_task', function () {
     $task_no      = (int) ( $_POST['task_no']      ?? 1 );
     $display_name = sanitize_text_field( $_POST['display_name'] ?? '' );
 
+    $badge_slug   = sanitize_key( $_POST['badge_slug'] ?? '' );
+    $badge_image  = esc_url_raw( $_POST['badge_image'] ?? '' );
+    $coin_value   = (int) ( $_POST['coin_value'] ?? 10 );
+    $is_rag       = ! empty( $_POST['is_rag'] ) ? 1 : 0;
+    $counts       = isset( $_POST['counts_for_week_badge'] ) ? ( $_POST['counts_for_week_badge'] ? 1 : 0 ) : 1;
+
     if ( ! $id || ! $display_name ) wp_send_json_error( 'Invalid data.' );
+
+    $course_id = (int) $wpdb->get_var( $wpdb->prepare(
+        "SELECT course_id FROM {$wpdb->prefix}mfsd_task_order WHERE id = %d", $id
+    ) );
 
     $wpdb->update(
         "{$wpdb->prefix}mfsd_task_order",
-        [ 'week' => $week, 'task_no' => $task_no, 'display_name' => $display_name ],
+        [
+            'week'                  => $week,
+            'task_no'               => $task_no,
+            'display_name'          => $display_name,
+            'badge_slug'            => $badge_slug ?: null,
+            'badge_image'           => $badge_image ?: null,
+            'coin_value'            => $coin_value,
+            'is_rag'                => $is_rag,
+            'counts_for_week_badge' => $counts,
+        ],
         [ 'id' => $id ]
     );
 
-    wp_send_json_success();
+    $warning = mfsd_cm_check_rag_duplicate( $course_id, $week, $is_rag, $id );
+
+    wp_send_json_success( [ 'warning' => $warning ] );
+} );
+
+add_action( 'wp_ajax_mfsd_cm_toggle_task', function () {
+    check_ajax_referer( 'mfsd_cm_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
+
+    global $wpdb;
+    $id     = (int) ( $_POST['id'] ?? 0 );
+    $active = (int) ( $_POST['active'] ?? 0 );
+    $new    = $active ? 0 : 1;
+
+    $wpdb->update( "{$wpdb->prefix}mfsd_task_order", [ 'active' => $new ], [ 'id' => $id ] );
+    wp_send_json_success( [ 'new_active' => $new ] );
 } );
 
 add_action( 'wp_ajax_mfsd_cm_delete_task', function () {
@@ -598,6 +705,27 @@ add_action( 'wp_ajax_mfsd_cm_delete_task', function () {
     $id = (int) ( $_POST['id'] ?? 0 );
     $wpdb->delete( "{$wpdb->prefix}mfsd_task_order", [ 'id' => $id ] );
     wp_send_json_success();
+} );
+
+// ── Week titles ────────────────────────────────
+add_action( 'wp_ajax_mfsd_cm_save_week_title', function () {
+    check_ajax_referer( 'mfsd_cm_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
+
+    global $wpdb;
+    $course_id = (int) ( $_POST['course_id'] ?? 0 );
+    $week      = (int) ( $_POST['week']      ?? 0 );
+    $title     = sanitize_text_field( $_POST['title'] ?? '' );
+
+    if ( ! $course_id || ! $week || ! $title ) wp_send_json_error( 'Course, week and title are all required.' );
+
+    $wpdb->query( $wpdb->prepare(
+        "INSERT INTO {$wpdb->prefix}mfsd_course_weeks (course_id, week, title) VALUES (%d, %d, %s)
+         ON DUPLICATE KEY UPDATE title = VALUES(title)",
+        $course_id, $week, $title
+    ) );
+
+    wp_send_json_success( [ 'title' => $title ] );
 } );
 
 // ─────────────────────────────────────────────
