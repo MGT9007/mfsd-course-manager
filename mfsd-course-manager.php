@@ -2,13 +2,13 @@
 /**
  * Plugin Name: MFSD Course Manager
  * Description: Admin interface for configuring MFSD courses, task ordering and viewing student progress.
- * Version:     3.0.0
+ * Version:     3.1.0
  * Author:      MisterT9007
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MFSD_CM_VERSION', '3.0.0' );
+define( 'MFSD_CM_VERSION', '3.1.0' );
 
 // ─────────────────────────────────────────────
 // DB MIGRATION — add image_url column if absent
@@ -244,7 +244,8 @@ function mfsd_cm_tab_task_order() {
                             <th style="width:60px;">Task #</th>
                             <th>Display Name</th>
                             <th>Plugin Slug</th>
-                            <th style="width:40px;" title="Badge configured">🏅</th>
+                            <th style="width:150px;">Badge</th>
+                            <th style="width:60px;">Coins</th>
                             <th style="width:70px;">Active</th>
                             <th style="width:160px;">Actions</th>
                         </tr>

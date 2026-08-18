@@ -4,7 +4,7 @@ jQuery(function ($) {
 
     const { ajaxUrl, nonce } = mfsdCM;
 
-    const TASK_COLSPAN = 9;
+    const TASK_COLSPAN = 10;
 
     // Populated from mfsd_cm_get_tasks each time a course is selected —
     // { [week]: title } — read by weekHeaderRow() for display.
@@ -35,6 +35,12 @@ jQuery(function ($) {
         return String(str)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;')
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function badgeCellHtml(badgeSlug, isRag) {
+        const hasBadge = !!badgeSlug;
+        if (!hasBadge && !isRag) return '—';
+        return (hasBadge ? '🏅 ' + escHtml(badgeSlug) : '') + (isRag ? ' 🔥' : '');
     }
 
     // ─────────────────────────────────────────
@@ -211,7 +217,7 @@ jQuery(function ($) {
                 currentWeek = week;
                 $tbody.append(weekHeaderRow(week));
             }
-            const hasBadge = !!t.badge_slug;
+            const coinVal = t.coin_value != null ? parseInt(t.coin_value) : 10;
             const $row = $(`
                 <tr data-id="${t.id}" data-week="${week}" data-task-no="${t.task_no}">
                     <td class="mfsd-drag-handle" title="Drag to reorder">⠿</td>
@@ -220,7 +226,8 @@ jQuery(function ($) {
                     <td class="task-no-display">${t.task_no}</td>
                     <td class="task-name-display">${escHtml(t.display_name)}</td>
                     <td><code>${escHtml(t.task_slug)}</code></td>
-                    <td class="task-badge-indicator" style="text-align:center;">${hasBadge ? '🏅' : '—'}</td>
+                    <td class="task-badge-display">${badgeCellHtml(t.badge_slug, t.is_rag == 1)}</td>
+                    <td class="task-coin-display" style="text-align:center;">${coinVal}</td>
                     <td><span class="mfsd-status-badge ${t.active == 1 ? 'badge-active' : 'badge-inactive'}">${t.active == 1 ? 'Active' : 'Off'}</span></td>
                     <td>
                         <button class="button button-small mfsd-edit-task" data-id="${t.id}">Edit</button>
@@ -614,7 +621,8 @@ jQuery(function ($) {
             $row.find('.task-week-display').text('Week ' + week);
             $row.find('.task-no-display').text(taskNo);
             $row.find('.task-name-display').text(name);
-            $row.find('.task-badge-indicator').text(badge_slug ? '🏅' : '—');
+            $row.find('.task-badge-display').html(badgeCellHtml(badge_slug, !!is_rag));
+            $row.find('.task-coin-display').text(parseInt(coin_value));
             $btn.prop('disabled', false)
                 .text('Edit')
                 .removeClass('mfsd-save-task')
