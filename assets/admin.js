@@ -4,7 +4,7 @@ jQuery(function ($) {
 
     const { ajaxUrl, nonce } = mfsdCM;
 
-    const TASK_COLSPAN = 10;
+    const TASK_COLSPAN = 11;
 
     // Populated from mfsd_cm_get_tasks each time a course is selected —
     // { [week]: title } — read by weekHeaderRow() for display.
@@ -217,7 +217,9 @@ jQuery(function ($) {
                 currentWeek = week;
                 $tbody.append(weekHeaderRow(week));
             }
-            const coinVal = t.coin_value != null ? parseInt(t.coin_value) : 10;
+            const coinVal      = t.coin_value != null ? parseInt(t.coin_value) : 10;
+            const shimmerOn    = t.shimmer_enabled == 1;
+            const shimmerIval  = t.shimmer_interval != null ? parseInt(t.shimmer_interval) : 5;
             const $row = $(`
                 <tr data-id="${t.id}" data-week="${week}" data-task-no="${t.task_no}">
                     <td class="mfsd-drag-handle" title="Drag to reorder">⠿</td>
@@ -228,6 +230,12 @@ jQuery(function ($) {
                     <td><code>${escHtml(t.task_slug)}</code></td>
                     <td class="task-badge-display">${badgeCellHtml(t.badge_slug, t.is_rag == 1)}</td>
                     <td class="task-coin-display" style="text-align:center;">${coinVal}</td>
+                    <td class="task-shimmer-cell">
+                        <label style="display:flex;align-items:center;gap:4px;white-space:nowrap;">
+                            <input type="checkbox" class="mfsd-inline-shimmer-enabled" data-id="${t.id}" ${shimmerOn ? 'checked' : ''}>
+                            <input type="number" class="mfsd-inline-shimmer-interval" data-id="${t.id}" value="${shimmerIval}" min="2" max="30" style="width:45px;" ${shimmerOn ? '' : 'disabled'}>
+                        </label>
+                    </td>
                     <td><span class="mfsd-status-badge ${t.active == 1 ? 'badge-active' : 'badge-inactive'}">${t.active == 1 ? 'Active' : 'Off'}</span></td>
                     <td>
                         <button class="button button-small mfsd-edit-task" data-id="${t.id}">Edit</button>
@@ -242,6 +250,8 @@ jQuery(function ($) {
             $row.data('coin-value', t.coin_value != null ? parseInt(t.coin_value) : 10);
             $row.data('is-rag', t.is_rag == 1);
             $row.data('counts', t.counts_for_week_badge == 1);
+            $row.data('shimmer-enabled', shimmerOn);
+            $row.data('shimmer-interval', shimmerIval);
             $tbody.append($row);
         });
 
@@ -403,6 +413,8 @@ jQuery(function ($) {
         const coin_value   = $('#new-task-coin-value').val();
         const counts_for_week_badge = $('#new-task-counts').is(':checked') ? 1 : 0;
         const is_rag       = $('#new-task-is-rag').is(':checked') ? 1 : 0;
+        const shimmer_enabled  = $('#new-task-shimmer-enabled').is(':checked') ? 1 : 0;
+        const shimmer_interval = $('#new-task-shimmer-interval').val();
         const $msg         = $('#mfsd-task-message');
 
         if (!display_name || !task_slug) {
@@ -413,6 +425,7 @@ jQuery(function ($) {
         ajax('mfsd_cm_add_task', {
             course_id, display_name, task_slug, week, task_no,
             badge_slug, badge_image, coin_value, counts_for_week_badge, is_rag,
+            shimmer_enabled, shimmer_interval,
         }, data => {
             $('#new-task-name, #new-task-slug, #new-task-badge-slug').val('');
             $('#new-task-badge-image').val('');
@@ -421,6 +434,8 @@ jQuery(function ($) {
             $('#new-task-coin-value').val(10);
             $('#new-task-counts').prop('checked', true);
             $('#new-task-is-rag').prop('checked', false);
+            $('#new-task-shimmer-enabled').prop('checked', false);
+            $('#new-task-shimmer-interval').val(5);
 
             showMsg($msg, `Task "${display_name}" added.${data.warning ? ' ⚠️ ' + data.warning : ''}`, false);
             loadTasks(course_id);
@@ -465,9 +480,35 @@ jQuery(function ($) {
         }, msg => alert(msg));
     });
 
+    // ── Inline Shimmer column — editable without opening Edit ──
+
+    function saveInlineShimmer($row) {
+        const id       = $row.data('id');
+        const $enabled = $row.find('.mfsd-inline-shimmer-enabled');
+        const $interval = $row.find('.mfsd-inline-shimmer-interval');
+        const shimmer_enabled  = $enabled.is(':checked') ? 1 : 0;
+        const shimmer_interval = $interval.val();
+
+        $interval.prop('disabled', !shimmer_enabled);
+
+        ajax('mfsd_cm_save_task_shimmer', { id, shimmer_enabled, shimmer_interval }, data => {
+            $row.data('shimmer-enabled', !!data.shimmer_enabled);
+            $row.data('shimmer-interval', data.shimmer_interval);
+            $interval.val(data.shimmer_interval);
+        }, msg => alert('Could not save shimmer setting: ' + msg));
+    }
+
+    $(document).on('change', '.mfsd-inline-shimmer-enabled', function () {
+        saveInlineShimmer($(this).closest('tr'));
+    });
+
+    $(document).on('change', '.mfsd-inline-shimmer-interval', function () {
+        saveInlineShimmer($(this).closest('tr'));
+    });
+
     // ── Inline Edit ────────────────────────────
 
-    function editDetailRow(id, badgeSlug, badgeImage, coinValue, isRag, counts) {
+    function editDetailRow(id, badgeSlug, badgeImage, coinValue, isRag, counts, shimmerOn, shimmerInterval) {
         return $(`
             <tr class="mfsd-edit-detail-row" data-id="${id}">
                 <td colspan="${TASK_COLSPAN}">
@@ -493,6 +534,13 @@ jQuery(function ($) {
                         </div>
                         <div>
                             <label><input type="checkbox" class="mfsd-edit-is-rag" ${isRag ? 'checked' : ''}> This is the week's RAG reflection task</label>
+                        </div>
+                        <div>
+                            <label><input type="checkbox" class="mfsd-edit-shimmer-enabled" ${shimmerOn ? 'checked' : ''}> Shimmer Sweep enabled</label>
+                        </div>
+                        <div>
+                            <label>Shimmer Interval (seconds)</label>
+                            <input type="number" class="mfsd-edit-shimmer-interval" value="${shimmerInterval}" min="2" max="30" style="width:70px;">
                         </div>
                     </div>
                 </td>
@@ -524,7 +572,9 @@ jQuery(function ($) {
             $row.data('badge-image') || '',
             $row.data('coin-value') != null ? $row.data('coin-value') : 10,
             !!$row.data('is-rag'),
-            !!$row.data('counts')
+            !!$row.data('counts'),
+            !!$row.data('shimmer-enabled'),
+            $row.data('shimmer-interval') != null ? $row.data('shimmer-interval') : 5
         );
         $row.after($detail);
 
@@ -599,6 +649,8 @@ jQuery(function ($) {
         const coin_value  = $detail.find('.mfsd-edit-coin-value').val();
         const counts_for_week_badge = $detail.find('.mfsd-edit-counts').is(':checked') ? 1 : 0;
         const is_rag      = $detail.find('.mfsd-edit-is-rag').is(':checked') ? 1 : 0;
+        const shimmer_enabled  = $detail.find('.mfsd-edit-shimmer-enabled').is(':checked') ? 1 : 0;
+        const shimmer_interval = $detail.find('.mfsd-edit-shimmer-interval').val();
 
         if (!name) { alert('Display name is required.'); return; }
 
@@ -607,6 +659,7 @@ jQuery(function ($) {
         ajax('mfsd_cm_update_task', {
             id, week, task_no: taskNo, display_name: name,
             badge_slug, badge_image, coin_value, counts_for_week_badge, is_rag,
+            shimmer_enabled, shimmer_interval,
         }, data => {
             $row.data('week', week).attr('data-week', week);
             $row.data('task-no', taskNo).attr('data-task-no', taskNo);
@@ -616,6 +669,8 @@ jQuery(function ($) {
             $row.data('coin-value', parseInt(coin_value));
             $row.data('is-rag', !!is_rag);
             $row.data('counts', !!counts_for_week_badge);
+            $row.data('shimmer-enabled', !!shimmer_enabled);
+            $row.data('shimmer-interval', parseInt(shimmer_interval));
 
             $row.removeClass('mfsd-editing');
             $row.find('.task-week-display').text('Week ' + week);
@@ -623,6 +678,8 @@ jQuery(function ($) {
             $row.find('.task-name-display').text(name);
             $row.find('.task-badge-display').html(badgeCellHtml(badge_slug, !!is_rag));
             $row.find('.task-coin-display').text(parseInt(coin_value));
+            $row.find('.mfsd-inline-shimmer-enabled').prop('checked', !!shimmer_enabled);
+            $row.find('.mfsd-inline-shimmer-interval').val(parseInt(shimmer_interval)).prop('disabled', !shimmer_enabled);
             $btn.prop('disabled', false)
                 .text('Edit')
                 .removeClass('mfsd-save-task')

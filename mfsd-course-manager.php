@@ -2,13 +2,13 @@
 /**
  * Plugin Name: MFSD Course Manager
  * Description: Admin interface for configuring MFSD courses, task ordering and viewing student progress.
- * Version:     3.1.0
+ * Version:     3.2.0
  * Author:      MisterT9007
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'MFSD_CM_VERSION', '3.1.0' );
+define( 'MFSD_CM_VERSION', '3.2.0' );
 
 // ─────────────────────────────────────────────
 // DB MIGRATION — add image_url column if absent
@@ -246,6 +246,7 @@ function mfsd_cm_tab_task_order() {
                             <th>Plugin Slug</th>
                             <th style="width:150px;">Badge</th>
                             <th style="width:60px;">Coins</th>
+                            <th style="width:110px;">Shimmer</th>
                             <th style="width:70px;">Active</th>
                             <th style="width:160px;">Actions</th>
                         </tr>
@@ -314,6 +315,16 @@ function mfsd_cm_tab_task_order() {
                         <input type="checkbox" id="new-task-is-rag">
                         This is the week's RAG reflection task
                     </label>
+                </div>
+                <div>
+                    <label>
+                        <input type="checkbox" id="new-task-shimmer-enabled">
+                        Shimmer Sweep enabled
+                    </label>
+                </div>
+                <div>
+                    <label>Shimmer Interval (seconds)</label>
+                    <input type="number" id="new-task-shimmer-interval" value="5" min="2" max="30" style="width:70px;">
                 </div>
             </div>
             <div class="mfsd-form-row" style="margin-top:10px;">
@@ -577,6 +588,8 @@ add_action( 'wp_ajax_mfsd_cm_add_task', function () {
     $coin_value   = (int) ( $_POST['coin_value'] ?? 10 );
     $is_rag       = ! empty( $_POST['is_rag'] ) ? 1 : 0;
     $counts       = isset( $_POST['counts_for_week_badge'] ) ? ( $_POST['counts_for_week_badge'] ? 1 : 0 ) : 1;
+    $shimmer_on   = ! empty( $_POST['shimmer_enabled'] ) ? 1 : 0;
+    $shimmer_int  = max( 2, min( 30, (int) ( $_POST['shimmer_interval'] ?? 5 ) ) );
 
     if ( ! $course_id || ! $task_slug || ! $display_name ) {
         wp_send_json_error( 'All fields are required.' );
@@ -600,6 +613,8 @@ add_action( 'wp_ajax_mfsd_cm_add_task', function () {
         'coin_value'            => $coin_value,
         'is_rag'                => $is_rag,
         'counts_for_week_badge' => $counts,
+        'shimmer_enabled'       => $shimmer_on,
+        'shimmer_interval'      => $shimmer_int,
     ] );
 
     $warning = mfsd_cm_check_rag_duplicate( $course_id, $week, $is_rag, $wpdb->insert_id );
@@ -658,6 +673,8 @@ add_action( 'wp_ajax_mfsd_cm_update_task', function () {
     $coin_value   = (int) ( $_POST['coin_value'] ?? 10 );
     $is_rag       = ! empty( $_POST['is_rag'] ) ? 1 : 0;
     $counts       = isset( $_POST['counts_for_week_badge'] ) ? ( $_POST['counts_for_week_badge'] ? 1 : 0 ) : 1;
+    $shimmer_on   = ! empty( $_POST['shimmer_enabled'] ) ? 1 : 0;
+    $shimmer_int  = max( 2, min( 30, (int) ( $_POST['shimmer_interval'] ?? 5 ) ) );
 
     if ( ! $id || ! $display_name ) wp_send_json_error( 'Invalid data.' );
 
@@ -676,6 +693,8 @@ add_action( 'wp_ajax_mfsd_cm_update_task', function () {
             'coin_value'            => $coin_value,
             'is_rag'                => $is_rag,
             'counts_for_week_badge' => $counts,
+            'shimmer_enabled'       => $shimmer_on,
+            'shimmer_interval'      => $shimmer_int,
         ],
         [ 'id' => $id ]
     );
@@ -696,6 +715,30 @@ add_action( 'wp_ajax_mfsd_cm_toggle_task', function () {
 
     $wpdb->update( "{$wpdb->prefix}mfsd_task_order", [ 'active' => $new ], [ 'id' => $id ] );
     wp_send_json_success( [ 'new_active' => $new ] );
+} );
+
+// MYF-340 — lightweight save for the inline Shimmer column on the Task Order
+// table, so it's editable without opening the full Edit form (per ticket).
+add_action( 'wp_ajax_mfsd_cm_save_task_shimmer', function () {
+    check_ajax_referer( 'mfsd_cm_nonce', 'nonce' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Unauthorised' );
+
+    global $wpdb;
+    $id      = (int) ( $_POST['id'] ?? 0 );
+    $enabled = ! empty( $_POST['shimmer_enabled'] ) ? 1 : 0;
+    $interval = max( 2, min( 30, (int) ( $_POST['shimmer_interval'] ?? 5 ) ) );
+
+    if ( ! $id ) wp_send_json_error( 'Invalid task ID.' );
+
+    $wpdb->update(
+        "{$wpdb->prefix}mfsd_task_order",
+        [ 'shimmer_enabled' => $enabled, 'shimmer_interval' => $interval ],
+        [ 'id' => $id ],
+        [ '%d', '%d' ],
+        [ '%d' ]
+    );
+
+    wp_send_json_success( [ 'shimmer_enabled' => $enabled, 'shimmer_interval' => $interval ] );
 } );
 
 add_action( 'wp_ajax_mfsd_cm_delete_task', function () {
